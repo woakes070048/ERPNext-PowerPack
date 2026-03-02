@@ -1,6 +1,6 @@
 /**
- * Bulk Selection for Sales & Stock Documents
- * Supports: Quotation, Sales Order, Sales Invoice, Stock Reconciliation, Stock Entry
+ * Bulk Selection for Sales, Purchase & Stock Documents
+ * Supports: Quotation, Sales Order, Purchase Order, Sales Invoice, Stock Reconciliation, Stock Entry
  *
  * Features:
  * - Bulk item selection with search and filtering
@@ -18,50 +18,90 @@ const BULK_SELECTION_CONFIG = {
         requires_warehouse: false,  // Warehouse is optional for Quotation
         has_taxes: true,
         has_price: true,
+        show_profit: true,
         is_stock_doctype: false,
+        is_purchase_doctype: false,
         customer_field: 'party_name',  // Quotation uses party_name
+        supplier_field: null,
         warehouse_field: 'set_warehouse',  // Unified with Sales Order/Invoice
-        item_warehouse_field: 'warehouse'
+        item_warehouse_field: 'warehouse',
+        price_list_field: 'selling_price_list',
+        price_label: 'Sell Price'
     },
     'Sales Order': {
         setting_field: 'enable_sales_order_bulk_selection',
         requires_warehouse: true,  // Warehouse is mandatory
         has_taxes: true,
         has_price: true,
+        show_profit: true,
         is_stock_doctype: false,
+        is_purchase_doctype: false,
         customer_field: 'customer',
+        supplier_field: null,
         warehouse_field: 'set_warehouse',
-        item_warehouse_field: 'warehouse'
+        item_warehouse_field: 'warehouse',
+        price_list_field: 'selling_price_list',
+        price_label: 'Sell Price'
+    },
+    'Purchase Order': {
+        setting_field: 'enable_purchase_order_bulk_selection',
+        requires_warehouse: false,  // Warehouse is optional for PO
+        has_taxes: true,
+        has_price: true,
+        show_profit: false,  // No profit display on buying side
+        is_stock_doctype: false,
+        is_purchase_doctype: true,
+        customer_field: null,
+        supplier_field: 'supplier',
+        warehouse_field: 'set_warehouse',
+        item_warehouse_field: 'warehouse',
+        price_list_field: 'buying_price_list',
+        price_label: 'Buy Price'
     },
     'Sales Invoice': {
         setting_field: 'enable_sales_invoice_bulk_selection',
         requires_warehouse: true,  // Warehouse is mandatory
         has_taxes: true,
         has_price: true,
+        show_profit: true,
         is_stock_doctype: false,
+        is_purchase_doctype: false,
         customer_field: 'customer',
+        supplier_field: null,
         warehouse_field: 'set_warehouse',
-        item_warehouse_field: 'warehouse'
+        item_warehouse_field: 'warehouse',
+        price_list_field: 'selling_price_list',
+        price_label: 'Sell Price'
     },
     'Stock Reconciliation': {
         setting_field: 'enable_stock_reconciliation_bulk_selection',
         requires_warehouse: true,
         has_taxes: false,
         has_price: false,
+        show_profit: false,
         is_stock_doctype: true,
+        is_purchase_doctype: false,
         customer_field: null,
+        supplier_field: null,
         warehouse_field: 'set_warehouse',
-        item_warehouse_field: 'warehouse'
+        item_warehouse_field: 'warehouse',
+        price_list_field: null,
+        price_label: null
     },
     'Stock Entry': {
         setting_field: 'enable_stock_entry_bulk_selection',
         requires_warehouse: false,  // depends on purpose; at least one of from/to
         has_taxes: false,
         has_price: false,
+        show_profit: false,
         is_stock_doctype: true,
+        is_purchase_doctype: false,
         customer_field: null,
+        supplier_field: null,
         warehouse_field: 'from_warehouse',
-        item_warehouse_field: 's_warehouse'
+        item_warehouse_field: 's_warehouse',
+        price_list_field: null,
+        price_label: null
     }
 };
 
@@ -96,7 +136,7 @@ Object.keys(BULK_SELECTION_CONFIG).forEach(doctype => {
     };
 
     // Sales-only handlers
-    if (!config.is_stock_doctype) {
+    if (!config.is_stock_doctype && !config.is_purchase_doctype) {
         handlers.selling_price_list = function(frm) {
             if (!frm._bulk_selection_enabled) return;
             toggle_bulk_button(frm);
@@ -110,9 +150,32 @@ Object.keys(BULK_SELECTION_CONFIG).forEach(doctype => {
         };
     }
 
+    // Purchase-only handlers
+    if (config.is_purchase_doctype) {
+        handlers.buying_price_list = function(frm) {
+            if (!frm._bulk_selection_enabled) return;
+            toggle_bulk_button(frm);
+            frm._bulk_item_cache = null;
+        };
+
+        handlers.taxes_and_charges = function(frm) {
+            if (!frm._bulk_selection_enabled) return;
+            frm._bulk_item_cache = null;
+        };
+    }
+
     // Add customer field handler based on doctype (sales only)
     if (config.customer_field) {
         handlers[config.customer_field] = function(frm) {
+            if (!frm._bulk_selection_enabled) return;
+            toggle_bulk_button(frm);
+            frm._bulk_item_cache = null;
+        };
+    }
+
+    // Add supplier field handler based on doctype (purchase only)
+    if (config.supplier_field) {
+        handlers[config.supplier_field] = function(frm) {
             if (!frm._bulk_selection_enabled) return;
             toggle_bulk_button(frm);
             frm._bulk_item_cache = null;
@@ -197,6 +260,13 @@ function toggle_bulk_button(frm) {
                     title = __('Please select a Warehouse first');
                 }
             }
+        } else if (config.is_purchase_doctype) {
+            // Purchase Order: requires supplier
+            let supplier = frm.doc[config.supplier_field];
+            disabled = !supplier;
+            if (disabled) {
+                title = __('Please select a Supplier first');
+            }
         } else {
             // Sales doctypes: existing logic
             let customer = get_customer(frm);
@@ -246,10 +316,11 @@ function get_cached_items(frm) {
         return frm._bulk_item_cache.items;
     }
 
-    // Sales doctypes: validate price_list, customer, taxes
-    let customer = get_customer(frm);
-    if (frm._bulk_item_cache.price_list === frm.doc.selling_price_list &&
-        frm._bulk_item_cache.customer === customer &&
+    const price_list_field = config.price_list_field;
+    const party_field = config.is_purchase_doctype ? config.supplier_field : config.customer_field;
+
+    if (frm._bulk_item_cache.price_list === frm.doc[price_list_field] &&
+        frm._bulk_item_cache.party === frm.doc[party_field] &&
         frm._bulk_item_cache.taxes_and_charges === frm.doc.taxes_and_charges) {
         return frm._bulk_item_cache.items;
     }
@@ -266,8 +337,10 @@ function set_cached_items(frm, items, warehouse) {
     };
 
     if (!config.is_stock_doctype) {
-        frm._bulk_item_cache.price_list = frm.doc.selling_price_list;
-        frm._bulk_item_cache.customer = get_customer(frm);
+        const price_list_field = config.price_list_field;
+        const party_field = config.is_purchase_doctype ? config.supplier_field : config.customer_field;
+        frm._bulk_item_cache.price_list = frm.doc[price_list_field];
+        frm._bulk_item_cache.party = frm.doc[party_field];
         frm._bulk_item_cache.taxes_and_charges = frm.doc.taxes_and_charges;
     }
 }
@@ -331,6 +404,47 @@ function show_bulk_item_selector(frm) {
                 frappe.msgprint(__('Error loading items'));
             }
         });
+    } else if (config.is_purchase_doctype) {
+        // Purchase doctypes (Purchase Order)
+        let supplier = frm.doc[config.supplier_field];
+        if (!supplier) {
+            frappe.msgprint(__('Please select a Supplier first'));
+            return;
+        }
+
+        let warehouse = get_warehouse(frm);
+        let can_see_cost = has_cost_permission();
+
+        let cached = get_cached_items(frm);
+        if (cached) {
+            show_item_dialog(frm, cached.items, can_see_cost, warehouse);
+            return;
+        }
+
+        frappe.show_progress(__('Loading Items'), 0, 100, __('Fetching item list...'));
+
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Item',
+                filters: { disabled: 0, is_purchase_item: 1 },
+                fields: ['name', 'item_name', 'stock_uom'],
+                limit_page_length: 0
+            },
+            callback: function(r) {
+                if (r.message && r.message.length > 0) {
+                    frappe.show_progress(__('Loading Items'), 50, 100, __('Fetching details for {0} items...', [r.message.length]));
+                    fetch_bulk_item_details(frm, r.message, warehouse, can_see_cost);
+                } else {
+                    frappe.hide_progress();
+                    frappe.msgprint(__('No items found'));
+                }
+            },
+            error: function() {
+                frappe.hide_progress();
+                frappe.msgprint(__('Error loading items'));
+            }
+        });
     } else {
         // Sales doctypes: existing logic
         let customer = get_customer(frm);
@@ -387,11 +501,14 @@ function show_bulk_item_selector(frm) {
 }
 
 function fetch_bulk_item_details(frm, items, warehouse, can_see_cost) {
+    const config = BULK_SELECTION_CONFIG[frm.doctype];
+    const price_list = frm.doc[config.price_list_field];
+
     frappe.call({
         method: 'cecypo_powerpack.api.get_bulk_item_details',
         args: {
             items: items.map(i => i.name),
-            price_list: frm.doc.selling_price_list,
+            price_list: price_list,
             warehouse: warehouse,
             customer: get_customer(frm),
             taxes_and_charges: frm.doc.taxes_and_charges,
@@ -657,9 +774,10 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
             ? `<th class="sortable text-right" data-column="actual_qty">Available <span class="sort-icon"></span></th>`
             : '';
 
-        // Sell Price and Line Total only for sales docs
+        // Sell/Buy Price and Line Total only for non-stock docs with price
+        let price_label = config.price_label || 'Sell Price';
         let sell_price_header = has_price
-            ? `<th class="sortable text-right" data-column="price_list_rate">Sell Price <span class="sort-icon"></span></th>`
+            ? `<th class="sortable text-right" data-column="price_list_rate">${price_label} <span class="sort-icon"></span></th>`
             : '';
         let line_total_header = has_price
             ? `<th class="text-right line-total-header">Line Total</th>`
@@ -806,10 +924,10 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
             `;
         }
 
-        // Sales doc summary with profit info
+        // Sales doc summary with profit info (skip for purchase docs)
         let profit_html = '';
 
-        if (can_see_cost && totals.total > 0) {
+        if (config.show_profit && can_see_cost && totals.total > 0) {
             let margin_class = totals.margin_pct >= 0 ? 'profit-positive' : 'profit-negative';
 
             // Show tax info when tax-inclusive
@@ -1407,7 +1525,7 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
 
         d.$wrapper.find('#stat-total').text(format_currency(totals.total));
 
-        if (can_see_cost) {
+        if (config.show_profit && can_see_cost) {
             let $profit = d.$wrapper.find('.profit-info');
             if (totals.total > 0) {
                 let margin_class = totals.margin_pct >= 0 ? 'profit-positive' : 'profit-negative';

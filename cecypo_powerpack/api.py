@@ -408,17 +408,17 @@ def get_bulk_item_details(items, price_list: str, warehouse: str = None, custome
                           tax_category: str = None, taxes_and_charges: str = None,
                           optimized: bool = True, doctype: str = 'Sales Order') -> dict:
     """
-    Get bulk item details for bulk selection in sales documents.
+    Get bulk item details for bulk selection in sales and purchase documents.
 
     Args:
         items: List of item codes (or pipe-delimited string)
-        price_list: Selling price list name
-        warehouse: Warehouse name (optional for Quotation)
-        customer: Customer name (optional)
+        price_list: Price list name (selling or buying depending on doctype)
+        warehouse: Warehouse name (optional for Quotation/Purchase Order)
+        customer: Customer name (optional, sales docs only)
         tax_category: Tax category (optional, will be fetched from customer if not provided)
         taxes_and_charges: Tax template name (for included_in_print_rate calculation)
         optimized: Use optimized batch queries (default: True)
-        doctype: DocType name (Sales Order, Sales Invoice, Quotation)
+        doctype: DocType name (Sales Order, Sales Invoice, Quotation, Purchase Order)
 
     Returns:
         dict: Contains 'items' (list), 'total_items' (int), 'tax_category' (str), 'tax_rate' (float)
@@ -429,7 +429,8 @@ def get_bulk_item_details(items, price_list: str, warehouse: str = None, custome
     feature_map = {
         'Sales Order': 'enable_sales_order_bulk_selection',
         'Sales Invoice': 'enable_sales_invoice_bulk_selection',
-        'Quotation': 'enable_quotation_bulk_selection'
+        'Quotation': 'enable_quotation_bulk_selection',
+        'Purchase Order': 'enable_purchase_order_bulk_selection'
     }
 
     feature_name = feature_map.get(doctype, 'enable_sales_order_bulk_selection')

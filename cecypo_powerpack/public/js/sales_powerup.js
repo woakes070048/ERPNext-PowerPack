@@ -245,6 +245,12 @@ cecypo_powerpack.sales_powerup = {
 		const tax_inclusive = profit_calc.is_tax_inclusive(cur_frm);
 		const item_tax_rate = profit_calc.calculate_item_tax_rate(item_doc.rate, item_doc.net_rate);
 
+		// "+" label: shown when document has taxes NOT included in print rate,
+		// meaning cost/purchase reference values will have tax added on top.
+		// item_tax_rate cannot be used here — when tax is non-inclusive, rate == net_rate so it is always 0.
+		const has_doc_taxes = cur_frm.doc.taxes && cur_frm.doc.taxes.some(t => (t.rate || 0) > 0);
+		const plus_sign = !tax_inclusive && has_doc_taxes ? '+' : '';
+
 		// Helper function to format currency without symbol
 		// If tax-inclusive, add tax to the value for display
 		const format_amount = (value, add_tax = false) => {
@@ -311,41 +317,38 @@ cecypo_powerpack.sales_powerup = {
 		// Show with tax if tax-inclusive to make it comparable to item rate
 		if (has_permission && show_valuation && data.valuation_rate !== null && data.valuation_rate !== undefined) {
 			const value_text = format_amount(data.valuation_rate, true);
-			const tax_label = !tax_inclusive && item_tax_rate > 0 ? '+' : '';
+			const tax_label = plus_sign;
 			html_parts.push(`<span class="info-item"><strong>Value:</strong> ${value_text}${tax_label}</span>`);
 		}
 
 		// Last purchase (with permission check)
 		// Show with tax if tax-inclusive to make it comparable to item rate
 		if (has_permission && show_last_purchase && data.last_purchase_rate !== null && data.last_purchase_rate !== undefined) {
-			let purchase_text = format_amount(data.last_purchase_rate, true);
+			let purchase_text = format_amount(data.last_purchase_rate, true) + plus_sign;
 			if (data.last_purchase_date) {
 				purchase_text += ` (${format_short_date(data.last_purchase_date)})`;
 			}
-			const tax_label = !tax_inclusive && item_tax_rate > 0 ? '+' : '';
-			html_parts.push(`<span class="info-item"><strong>Last Purchase:</strong> ${purchase_text}${tax_label}</span>`);
+			html_parts.push(`<span class="info-item"><strong>Last Purchase:</strong> ${purchase_text}</span>`);
 		}
 
 		// Last sale to anyone
 		// Show with tax if tax-inclusive to make it comparable to item rate
 		if (show_last_sale && data.last_sale_rate !== null && data.last_sale_rate !== undefined) {
-			let last_sale_text = format_amount(data.last_sale_rate, true);
+			let last_sale_text = format_amount(data.last_sale_rate, true) + plus_sign;
 			if (data.last_sale_date) {
 				last_sale_text += ` (${format_short_date(data.last_sale_date)})`;
 			}
-			const tax_label = !tax_inclusive && item_tax_rate > 0 ? '+' : '';
-			html_parts.push(`<span class="info-item"><strong>Last Sale:</strong> ${last_sale_text}${tax_label}</span>`);
+			html_parts.push(`<span class="info-item"><strong>Last Sale:</strong> ${last_sale_text}</span>`);
 		}
 
 		// Last sale to this customer
 		// Show with tax if tax-inclusive to make it comparable to item rate
 		if (show_last_sale_customer && data.last_sale_to_customer_rate !== null && data.last_sale_to_customer_rate !== undefined) {
-			let customer_sale_text = format_amount(data.last_sale_to_customer_rate, true);
+			let customer_sale_text = format_amount(data.last_sale_to_customer_rate, true) + plus_sign;
 			if (data.last_sale_to_customer_date) {
 				customer_sale_text += ` (${format_short_date(data.last_sale_to_customer_date)})`;
 			}
-			const tax_label = !tax_inclusive && item_tax_rate > 0 ? '+' : '';
-			html_parts.push(`<span class="info-item"><strong>Last Sold to Customer:</strong> ${customer_sale_text}${tax_label}</span>`);
+			html_parts.push(`<span class="info-item"><strong>Last Sold to Customer:</strong> ${customer_sale_text}</span>`);
 		}
 
 		// Calculate profit indicator separately (positioned on far right via CSS)

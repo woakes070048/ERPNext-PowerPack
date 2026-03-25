@@ -301,21 +301,15 @@
   },
   {
    "default": "0",
-   "fieldname": "enable_payment_reconciliation_zero_allocate",
+   "fieldname": "enable_payment_reconciliation_powerup",
    "fieldtype": "Check",
-   "label": "Enable Zero Allocate Feature"
-  },
-  {
-   "default": "0",
-   "fieldname": "enable_payment_reconciliation_2pct_allocate",
-   "fieldtype": "Check",
-   "label": "Enable 2% Allocate Feature"
+   "label": "Enable Payment Reconciliation Powerup"
   },
   {
    "fieldname": "payment_reconciliation_description",
    "fieldtype": "HTML",
    "label": "Description",
-   "options": "<p class=\"text-muted\">Enable the 'Zero Allocate' button to create allocation rows with zero amounts for selected payments and invoices, allowing manual distribution without FIFO.<br>Enable the '2% Allocate' button (Supplier only) to automatically set each allocation's amount to 2% of the invoice net total (Kenya VAT withholding).</p>"
+   "options": "<p class=\"text-muted\">Enables all Payment Reconciliation enhancements:<br><strong>Zero Allocate</strong> — create allocation rows with zero amounts for manual distribution without FIFO.<br><strong>Zero Reconcile</strong> — reconcile allocations, skipping zero-amount rows.<br><strong>2% Allocate</strong> (Supplier only) — set each allocation to 2% of the invoice net total (Kenya VAT withholding).<br><strong>Load Additional Doc Info</strong> — inline ETR numbers, supplier bill numbers, VAT withholding details, and credit note indicators.</p>"
   },
   {
    "fieldname": "validation_section",
@@ -381,6 +375,18 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Sales User"
+  },
+  {
+   "read": 1,
+   "role": "Stock User"
+  },
+  {
+   "read": 1,
+   "role": "Accounts User"
   }
  ],
  "sort_field": "modified",

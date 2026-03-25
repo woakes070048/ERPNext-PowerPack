@@ -33,7 +33,7 @@ class CustomPaymentReconciliation(PaymentReconciliation):
         from cecypo_powerpack.utils import is_feature_enabled
 
         # Check if feature is enabled
-        if not is_feature_enabled('enable_payment_reconciliation_zero_allocate'):
+        if not is_feature_enabled('enable_payment_reconciliation_powerup'):
             frappe.throw(_("Zero Allocate feature is not enabled in PowerPack Settings"))
 
         # Filter out zero allocations
@@ -71,8 +71,10 @@ class CustomPaymentReconciliation(PaymentReconciliation):
         """
         Internal method that performs reconciliation without the strict validation.
         Uses ERPNext's reconcile_against_document but skips "Payment Entry modified" check.
+        For credit/debit notes (SI/PI with is_return=1), uses reconcile_dr_cr_note instead.
         """
         from erpnext.accounts.utils import reconcile_against_document
+        from erpnext.accounts.doctype.payment_reconciliation.payment_reconciliation import reconcile_dr_cr_note
         import erpnext.accounts.utils
 
         # Temporarily replace the validation function
@@ -108,7 +110,10 @@ class CustomPaymentReconciliation(PaymentReconciliation):
                     "exchange_rate": row.exchange_rate or 1,
                     "difference_amount": row.difference_amount or 0,
                     "difference_account": row.difference_account,
-                    "exchange_gain_loss": row.difference_amount or 0
+                    "exchange_gain_loss": row.difference_amount or 0,
+                    "currency": row.currency,
+                    "cost_center": row.get("cost_center"),
+                    "debit_or_credit_note_posting_date": row.get("debit_or_credit_note_posting_date"),
                 })
 
                 # Add accounting dimensions
@@ -122,8 +127,9 @@ class CustomPaymentReconciliation(PaymentReconciliation):
                         if dimension_field:
                             reconciled_entry[dimension_field] = row.get(dimension_field)
 
-                # Categorize entries
-                if row.reference_type in ["Sales Invoice", "Purchase Invoice", "Journal Entry"]:
+                # Categorize entries: credit/debit notes use reconcile_dr_cr_note,
+                # payment entries and journal entries use reconcile_against_document
+                if row.reference_type in ["Sales Invoice", "Purchase Invoice"]:
                     dr_or_cr_notes.append(reconciled_entry)
                 else:
                     entry_list.append(reconciled_entry)
@@ -134,8 +140,9 @@ class CustomPaymentReconciliation(PaymentReconciliation):
             if entry_list:
                 reconcile_against_document(entry_list, skip_ref_details_update_for_pe, self.dimensions)
 
+            # Credit/debit notes require their own reconciliation path that creates a JE
             if dr_or_cr_notes:
-                reconcile_against_document(dr_or_cr_notes, skip_ref_details_update_for_pe, self.dimensions)
+                reconcile_dr_cr_note(dr_or_cr_notes, self.company, self.dimensions)
 
         finally:
             # Always restore original validation function

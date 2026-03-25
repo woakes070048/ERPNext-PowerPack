@@ -546,6 +546,148 @@ frappe.ui.form.on('POS Invoice', {
     }
 });
 
+/**
+ * ETR Invoice Number helpers for Purchase Invoice
+ * Gated by enable_warnings in PowerPack Settings.
+ */
+CecypoPowerPack.ETRInvoice = {
+
+	// TIMS:  exactly 19 digits
+	// eTIMS: KRACU + any word chars (taxpayer code) + / + digits
+	_REGEX: /^\d{19}$|^KRACU\w+\/\d+$/,
+
+	isValid(value) {
+		return !value || this._REGEX.test(value);
+	},
+
+	// Determine verification URL based on format
+	_verifyUrl(etr) {
+		const is_tims = /^\d{19}$/.test(etr);
+		if (is_tims) {
+			return `https://itax.kra.go.ke/KRA-Portal/invoiceChk.htm?actionCode=loadPage&invoiceNo=${etr}`;
+		}
+		// eTIMS — replace all slashes with hyphens for the URL
+		return `https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsInvoiceData?Data=${etr.replace(/\//g, '-')}`;
+	},
+
+	setupFieldValidation(frm) {
+		const fd = frm.fields_dict.etr_invoice_number;
+		if (!fd || !fd.$input) return;
+
+		// Inject validation message element once
+		if (!fd.$wrapper.find('.etr-validation-msg').length) {
+			fd.$wrapper.append('<div class="etr-validation-msg" style="color:var(--red-500);font-size:11px;margin-top:2px;"></div>');
+		}
+
+		fd.$input.off('input.etr').on('input.etr', function () {
+			const val  = $(this).val();
+			const $msg = fd.$wrapper.find('.etr-validation-msg');
+			const ok   = !val || CecypoPowerPack.ETRInvoice._REGEX.test(val);
+			$msg.text(ok ? '' : __('Invalid TIMS/eTIMS format ({0} chars)', [val.length]));
+			$(this).toggleClass('is-invalid', !ok);
+		});
+	},
+
+	setupButtons(frm) {
+		const fd = frm.fields_dict.etr_invoice_number;
+		if (!fd) return;
+
+		// Dedup — remove any previously injected container on each refresh
+		fd.$wrapper.find('.etr-action-buttons').remove();
+
+		const $container = $(`
+			<div class="etr-action-buttons" style="margin-top:5px;display:flex;gap:8px;">
+				<button class="btn btn-xs btn-primary btn-verify">${__('Verify')}</button>
+				<button class="btn btn-xs btn-default btn-last-cuin">${__('Get Last CU INV')}</button>
+			</div>`);
+
+		fd.$wrapper.find('.control-input-wrapper').after($container);
+		$container.find('.btn-verify').on('click', () => CecypoPowerPack.ETRInvoice.verify(frm));
+		$container.find('.btn-last-cuin').on('click', () => CecypoPowerPack.ETRInvoice.getLastCUIN(frm));
+	},
+
+	verify(frm) {
+		const etr = frm.doc.etr_invoice_number;
+		if (!etr) {
+			frappe.show_alert({ message: __('Please fill the ETR Invoice Number first.'), indicator: 'red' });
+			return;
+		}
+		window.open(this._verifyUrl(etr));
+	},
+
+	getLastCUIN(frm) {
+		if (frm.doc.etr_invoice_number) {
+			frappe.show_alert({ message: __('ETR Invoice Number already has a value.'), indicator: 'orange' });
+			return;
+		}
+		if (!frm.doc.supplier) {
+			frappe.show_alert({ message: __('Please select a Supplier first.'), indicator: 'orange' });
+			return;
+		}
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Purchase Invoice',
+				fields: ['etr_invoice_number'],
+				filters: {
+					supplier: frm.doc.supplier,
+					etr_invoice_number: ['!=', ''],
+				},
+				order_by: 'creation desc',
+				limit: 1,
+			},
+			callback(r) {
+				if (r.message?.length && r.message[0].etr_invoice_number) {
+					frm.set_value('etr_invoice_number', r.message[0].etr_invoice_number);
+				} else {
+					frappe.msgprint({
+						title: __('Not Found'),
+						indicator: 'orange',
+						message: __('No ETR Invoice Number found on previous invoices for this supplier.'),
+					});
+				}
+			},
+		});
+	},
+};
+
+frappe.ui.form.on('Purchase Invoice', {
+	onload(frm) {
+		CecypoPowerPack.Settings.isEnabled('enable_warnings', enabled => {
+			if (!enabled) return;
+			CecypoPowerPack.ETRInvoice.setupFieldValidation(frm);
+		});
+	},
+
+	refresh(frm) {
+		CecypoPowerPack.Settings.isEnabled('enable_warnings', enabled => {
+			if (!enabled) return;
+			CecypoPowerPack.ETRInvoice.setupButtons(frm);
+		});
+	},
+
+	before_submit(frm) {
+		// Wrap in a Promise so Frappe waits for user decision before proceeding
+		return new Promise((resolve, reject) => {
+			CecypoPowerPack.Settings.isEnabled('enable_warnings', enabled => {
+				if (!enabled || frm.doc.etr_invoice_number) {
+					resolve();
+					return;
+				}
+				frappe.confirm(
+					__('The ETR Invoice Number is empty. Submit anyway?'),
+					resolve,
+					() => {
+						frappe.show_alert({ message: __('Please fill the ETR Invoice Number.'), indicator: 'orange' });
+						frm.scroll_to_field('etr_invoice_number');
+						reject();
+					}
+				);
+			});
+		});
+	},
+});
+
 // Overdue invoice checks for sales documents
 frappe.ui.form.on('Sales Order', {
     customer: function(frm) {

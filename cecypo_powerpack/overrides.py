@@ -27,7 +27,7 @@ def validate_allocation_with_zero_support(doc, method=None):
     from cecypo_powerpack.utils import is_feature_enabled
 
     # Only apply custom logic if feature is enabled
-    if not is_feature_enabled('enable_payment_reconciliation_zero_allocate'):
+    if not is_feature_enabled('enable_payment_reconciliation_powerup'):
         return
 
     if not doc.allocation:
@@ -124,7 +124,7 @@ def reconcile_wrapper(doc):
     reconciliation_doc = frappe.get_doc(doc)
 
     # Check if feature is enabled
-    if is_feature_enabled('enable_payment_reconciliation_zero_allocate'):
+    if is_feature_enabled('enable_payment_reconciliation_powerup'):
         if reconciliation_doc.allocation:
             # Filter out zero-amount allocations
             original_count = len(reconciliation_doc.allocation)

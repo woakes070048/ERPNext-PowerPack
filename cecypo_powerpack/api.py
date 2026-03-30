@@ -942,7 +942,7 @@ def zero_allocate_entries(doc, payments, invoices):
 
     try:
         # Check if feature is enabled
-        if not is_feature_enabled('enable_payment_reconciliation_zero_allocate'):
+        if not is_feature_enabled('enable_payment_reconciliation_powerup'):
             frappe.throw(_("Zero Allocate feature is not enabled in PowerPack Settings"))
 
         # Parse JSON inputs if needed

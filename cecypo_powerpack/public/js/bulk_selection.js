@@ -860,13 +860,13 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
 
                 let cost_cell = '';
                 if (is_stock) {
-                    cost_cell = `<td class="text-right">${format_currency(item.valuation_rate || 0)}</td>`;
+                    cost_cell = `<td class="text-right">${_bulk_fmt_currency(item.valuation_rate || 0)}</td>`;
                 } else if (can_see_cost) {
                     let display_valuation = item.valuation_rate || 0;
                     if (cost_tax_inclusive && cost_tax_rate > 0) {
                         display_valuation = display_valuation * (1 + cost_tax_rate);
                     }
-                    cost_cell = `<td class="text-right cost-price-cell" data-item="${item.item_code}">${format_currency(display_valuation)}${cost_plus_sign}</td>`;
+                    cost_cell = `<td class="text-right cost-price-cell" data-item="${item.item_code}">${_bulk_fmt_currency(display_valuation)}${cost_plus_sign}</td>`;
                 }
 
                 let stock_cell = warehouse
@@ -874,11 +874,11 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
                     : '';
 
                 let sell_price_cell = has_price
-                    ? `<td class="text-right sell-price-cell" data-item="${item.item_code}">${format_currency(rate)}</td>`
+                    ? `<td class="text-right sell-price-cell" data-item="${item.item_code}">${_bulk_fmt_currency(rate)}</td>`
                     : '';
 
                 let line_total_cell = has_price
-                    ? `<td class="text-right line-total">${format_currency(line_total)}</td>`
+                    ? `<td class="text-right line-total">${_bulk_fmt_currency(line_total)}</td>`
                     : '';
 
                 let image_cell = item.image
@@ -957,14 +957,14 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
             // Show tax info when tax-inclusive
             let tax_info = '';
             if (totals.tax_inclusive && totals.total_taxes > 0) {
-                tax_info = ` | Tax: ${format_currency(totals.total_taxes)}`;
+                tax_info = ` | Tax: ${_bulk_fmt_currency(totals.total_taxes)}`;
             }
 
             profit_html = `
                 <div class="stat-item profit-info ${margin_class}">
                     <span class="profit-detail">
-                        Cost: ${format_currency(totals.display_cost)}${totals.tax_inclusive ? ' <span class="tax-note">(incl. tax)</span>' : ''} |
-                        Profit: ${format_currency(totals.profit)}
+                        Cost: ${_bulk_fmt_currency(totals.display_cost)}${totals.tax_inclusive ? ' <span class="tax-note">(incl. tax)</span>' : ''} |
+                        Profit: ${_bulk_fmt_currency(totals.profit)}
                         (${totals.margin_pct.toFixed(1)}%)${tax_info}
                     </span>
                 </div>
@@ -984,7 +984,7 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
                     </div>
                     <div class="stat-item grand-total">
                         <span class="stat-label">Grand Total:</span>
-                        <span class="stat-value" id="stat-total">${format_currency(totals.total)}</span>
+                        <span class="stat-value" id="stat-total">${_bulk_fmt_currency(totals.total)}</span>
                     </div>
                     ${profit_html}
                 </div>
@@ -1547,7 +1547,7 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
             return;
         }
 
-        d.$wrapper.find('#stat-total').text(format_currency(totals.total));
+        d.$wrapper.find('#stat-total').text(_bulk_fmt_currency(totals.total));
 
         if (config.show_profit && can_see_cost) {
             let $profit = d.$wrapper.find('.profit-info');
@@ -1557,11 +1557,11 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
                 // Show tax info when tax-inclusive
                 let tax_info = '';
                 if (totals.tax_inclusive && totals.total_taxes > 0) {
-                    tax_info = ` | Tax: ${format_currency(totals.total_taxes)}`;
+                    tax_info = ` | Tax: ${_bulk_fmt_currency(totals.total_taxes)}`;
                 }
 
-                let detail_html = `Cost: ${format_currency(totals.display_cost)}${totals.tax_inclusive ? ' <span class="tax-note">(incl. tax)</span>' : ''} | ` +
-                    `Profit: ${format_currency(totals.profit)} ` +
+                let detail_html = `Cost: ${_bulk_fmt_currency(totals.display_cost)}${totals.tax_inclusive ? ' <span class="tax-note">(incl. tax)</span>' : ''} | ` +
+                    `Profit: ${_bulk_fmt_currency(totals.profit)} ` +
                     `(${totals.margin_pct.toFixed(1)}%)${tax_info}`;
 
                 if ($profit.length) {
@@ -1709,7 +1709,7 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
                     <div class="history-row">
                         <span class="history-date">${sale.date}</span>
                         <span class="history-qty">Qty: ${sale.qty}</span>
-                        <span class="history-price">${format_currency(sale.rate_with_tax)}</span>
+                        <span class="history-price">${_bulk_fmt_currency(sale.rate_with_tax)}</span>
                     </div>`;
             });
         }
@@ -1808,7 +1808,7 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
                     <div class="history-row">
                         <span class="history-date">${purchase.date}</span>
                         <span class="history-supplier" title="${purchase.supplier}">${(purchase.supplier || '').substring(0, 15)}${(purchase.supplier || '').length > 15 ? '...' : ''}</span>
-                        <span class="history-price purchase-price">${format_currency(purchase.rate_with_tax)}</span>
+                        <span class="history-price purchase-price">${_bulk_fmt_currency(purchase.rate_with_tax)}</span>
                     </div>`;
             });
         }
@@ -1845,7 +1845,7 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
 
             if (has_price) {
                 let rate = parseFloat($row.data('rate')) || 0;
-                $row.find('.line-total').text(format_currency(qty * rate));
+                $row.find('.line-total').text(_bulk_fmt_currency(qty * rate));
             }
             $row.find('.item-checkbox').prop('checked', qty > 0);
             $row.toggleClass('has-qty', qty > 0);
@@ -1870,7 +1870,7 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
 
             if (has_price) {
                 let rate = parseFloat($row.data('rate')) || 0;
-                $row.find('.line-total').text(format_currency(state.quantities[item_code] * rate));
+                $row.find('.line-total').text(_bulk_fmt_currency(state.quantities[item_code] * rate));
             }
             $row.toggleClass('has-qty', state.quantities[item_code] > 0);
 
@@ -1897,7 +1897,7 @@ function show_item_dialog(frm, item_data, can_see_cost, warehouse) {
                 $row.find('.item-checkbox').prop('checked', checked);
                 if (has_price) {
                     let rate = parseFloat($row.data('rate')) || 0;
-                    $row.find('.line-total').text(format_currency(state.quantities[item_code] * rate));
+                    $row.find('.line-total').text(_bulk_fmt_currency(state.quantities[item_code] * rate));
                 }
                 $row.toggleClass('has-qty', state.quantities[item_code] > 0);
             });
@@ -2228,7 +2228,7 @@ function add_items_to_doc(frm, selected_items, warehouse) {
     });
 }
 
-function format_currency(value) {
+function _bulk_fmt_currency(value) {
     if (value === null || value === undefined || value === 0) return '\u2014';
     // Use native formatting to avoid recursion with frappe's formatter system
     let formatted = parseFloat(value).toLocaleString('en-US', {

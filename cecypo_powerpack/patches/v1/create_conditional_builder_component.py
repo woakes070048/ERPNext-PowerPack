@@ -4,11 +4,15 @@ import frappe
 def execute():
 	"""
 	Conditionally create the powerpack-document-viewer Builder Component fixture
-	only if the builder app is installed.
+	only if the builder app is installed and the table exists.
 	"""
 	# Check if builder app is installed
 	if "builder" not in frappe.get_installed_apps():
 		return  # Skip silently if builder is not installed
+
+	# Check if the Builder Component table exists
+	if not frappe.db.table_exists("Builder Component"):
+		return  # Skip silently if table doesn't exist (DocType not yet created)
 
 	# Check if the component already exists
 	if frappe.db.exists("Builder Component", "powerpack-document-viewer"):

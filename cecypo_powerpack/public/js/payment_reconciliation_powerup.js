@@ -105,6 +105,7 @@ frappe.ui.form.on('Payment Reconciliation', {
 		is_powerpack_enabled().then(enabled => {
 			if (!enabled) return;
 			setup_zero_allocate_button(frm);
+			setup_zero_allocate_paste_button(frm);
 			setup_load_doc_info_button(frm);
 			setup_allocate_2pct_button(frm);
 		});
@@ -112,10 +113,17 @@ frappe.ui.form.on('Payment Reconciliation', {
 	party_type(frm) {
 		remove_all_displays();
 		is_powerpack_enabled().then(enabled => {
-			if (enabled) setup_allocate_2pct_button(frm);
+			if (!enabled) return;
+			setup_zero_allocate_paste_button(frm);
+			setup_allocate_2pct_button(frm);
 		});
 	},
-	get_unreconciled_entries(frm) { remove_all_displays(); },
+	get_unreconciled_entries(frm) {
+		remove_all_displays();
+		is_powerpack_enabled().then(enabled => {
+			if (enabled) setup_zero_allocate_paste_button(frm);
+		});
+	},
 	allocate(frm) {
 		remove_all_displays();
 		is_powerpack_enabled().then(enabled => {
@@ -608,6 +616,89 @@ async function apply_2pct_allocation(frm) {
 			indicator: 'green',
 		});
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ZERO ALLOCATE WITH PASTE (Supplier only)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function setup_zero_allocate_paste_button(frm) {
+	try { frm.page.remove_inner_button(__('Zero Allocate with Paste'), __('Powerup')); } catch (_) {}
+	if (frm.doc.party_type !== 'Supplier') return;
+	const has_credit = (frm.doc.payments || []).some(p => (p.amount || 0) > 0);
+	if (!has_credit) return;
+	frm.page.add_inner_button(
+		__('Zero Allocate with Paste'),
+		() => zero_allocate_with_paste(frm),
+		__('Powerup'),
+	);
+}
+
+// ─── Paste parser ─────────────────────────────────────────────────────────────
+
+const _CURRENCY_SYMBOL_RE = /^(KES|USD|EUR|GBP|INR|\$|€|£|₹)\s*/i;
+
+function _normalize_amount(raw) {
+	if (raw == null) return NaN;
+	let s = String(raw).trim();
+	if (!s) return NaN;
+	s = s.replace(_CURRENCY_SYMBOL_RE, '').trim();
+	// Strip thousands commas only if a dot is also present OR there are no commas acting as decimals.
+	// For Excel/KE locale we expect '.' decimal and ',' thousands.
+	s = s.replace(/,/g, '');
+	if (!/^-?\d+(\.\d+)?$/.test(s)) return NaN;
+	return parseFloat(s);
+}
+
+function _split_line(line) {
+	// First delimiter wins: tab > multi-space > comma.
+	if (line.includes('\t')) return line.split('\t');
+	if (/\s{2,}/.test(line)) return line.split(/\s{2,}/);
+	if (line.includes(',')) return line.split(',');
+	return [line];
+}
+
+function parse_paste(text) {
+	const rows = [];
+	const skipped = [];
+	if (!text) return { rows, skipped };
+
+	const raw_lines = text.split(/\r?\n/);
+	let first_content_line_seen = false;
+
+	for (let i = 0; i < raw_lines.length; i++) {
+		const raw = raw_lines[i];
+		const line = raw.trim();
+		if (!line) continue;
+
+		const parts = _split_line(line).map(p => p.trim());
+		if (parts.length < 2) {
+			skipped.push({ line: raw, reason: 'Invalid amount' });
+			continue;
+		}
+		const bill_no = parts[0];
+		const amount = _normalize_amount(parts[1]);
+
+		if (!first_content_line_seen) {
+			first_content_line_seen = true;
+			if (isNaN(amount)) {
+				// Auto-detect header row — skip silently
+				continue;
+			}
+		}
+
+		if (!bill_no || isNaN(amount)) {
+			skipped.push({ line: raw, reason: 'Invalid amount' });
+			continue;
+		}
+		rows.push({ bill_no, amount });
+	}
+	return { rows, skipped };
+}
+
+function zero_allocate_with_paste(frm) {
+	// Stub — wired up in Task 5
+	frappe.msgprint(__('Zero Allocate with Paste — coming in Task 5'));
 }
 
 })();

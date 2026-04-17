@@ -12,7 +12,74 @@ $(document).ready(function () {
     CecypoPowerPack.Settings.isEnabled('enable_compact_theme', function (enabled) {
         $('body').toggleClass('compact-theme', enabled);
     });
+
+    // Apply company border indicator
+    CecypoPowerPack.CompanyBorder.apply();
 });
+
+/**
+ * Company Border Indicator
+ * Renders fixed top/bottom colored bars based on the user's default company.
+ */
+CecypoPowerPack.CompanyBorder = {
+    _TOP_ID: 'pp-border-top',
+    _BOT_ID: 'pp-border-bottom',
+
+    apply: function () {
+        CecypoPowerPack.Settings.get(function (settings) {
+            const rows = settings.company_borders || [];
+            if (!rows.length) {
+                CecypoPowerPack.CompanyBorder._remove();
+                return;
+            }
+
+            const company = frappe.defaults.get_default('company');
+            if (!company) {
+                CecypoPowerPack.CompanyBorder._remove();
+                return;
+            }
+
+            const row = rows.find(function (r) { return r.company === company; });
+            if (!row || !row.color) {
+                CecypoPowerPack.CompanyBorder._remove();
+                return;
+            }
+
+            CecypoPowerPack.CompanyBorder._render(row.color, row.top_border || 0, row.bottom_border || 0);
+        });
+    },
+
+    _render: function (color, topPx, botPx) {
+        this._setBar(this._TOP_ID, color, topPx, 'top');
+        this._setBar(this._BOT_ID, color, botPx, 'bottom');
+    },
+
+    _setBar: function (id, color, px, edge) {
+        var $el = $('#' + id);
+        if (px <= 0) {
+            $el.remove();
+            return;
+        }
+        if (!$el.length) {
+            $el = $('<div>').attr('id', id).css('pointer-events', 'none');
+            $('body').append($el);
+        }
+        $el.css({
+            position: 'fixed',
+            left: 0,
+            right: 0,
+            height: px + 'px',
+            background: color,
+            zIndex: 9999,
+            top: edge === 'top' ? 0 : 'auto',
+            bottom: edge === 'bottom' ? 0 : 'auto'
+        });
+    },
+
+    _remove: function () {
+        $('#' + this._TOP_ID + ', #' + this._BOT_ID).remove();
+    }
+};
 
 /**
  * Show system health status
@@ -119,10 +186,11 @@ CecypoPowerPack.ItemListPowerup = {
     }
 };
 
-// Clear cache when PowerPack Settings form is saved
+// Clear cache when PowerPack Settings form is saved and re-apply border
 frappe.ui.form.on('PowerPack Settings', {
     after_save: function(frm) {
         CecypoPowerPack.Settings.clearCache();
+        CecypoPowerPack.CompanyBorder.apply();
         frappe.show_alert({
             message: __('PowerPack Settings cache cleared'),
             indicator: 'green'

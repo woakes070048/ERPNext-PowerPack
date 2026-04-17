@@ -8,6 +8,9 @@
   "theme_section",
   "enable_compact_theme",
   "compact_theme_description",
+  "company_border_section",
+  "company_borders",
+  "company_border_description",
   "pos_powerup_section",
   "enable_pos_powerup",
   "pos_powerup_description",
@@ -84,6 +87,23 @@
    "fieldtype": "HTML",
    "label": "Description",
    "options": "<p class=\"text-muted\">Reduces line-height and input sizes for a more compact, information-dense layout.</p>"
+  },
+  {
+   "fieldname": "company_border_section",
+   "fieldtype": "Section Break",
+   "label": "Company Border Indicator"
+  },
+  {
+   "fieldname": "company_borders",
+   "fieldtype": "Table",
+   "label": "Company Borders",
+   "options": "Powerpack Company Border"
+  },
+  {
+   "fieldname": "company_border_description",
+   "fieldtype": "HTML",
+   "label": "Description",
+   "options": "<p class=\"text-muted\">Add a colored border to the top and/or bottom of the site for each company. The border matching the user's default company is shown, making it easy to tell at a glance which company you are working in.</p>"
   },
   {
    "fieldname": "pos_powerup_section",

@@ -1418,3 +1418,114 @@ def custom_item_query(doctype, txt, searchfield, start, page_len, filters, as_di
 		values,
 		as_dict=as_dict,
 	)
+
+
+@frappe.whitelist()
+def resolve_bill_numbers_for_credit(company: str, supplier: str, bill_numbers: str) -> dict:
+	"""
+	Resolve pasted bill_no strings to open Purchase Invoices for a given supplier/company.
+
+	Used by the "Zero Allocate with Paste" PowerUp in Payment Reconciliation.
+
+	Args:
+		company: Company to scope the query to.
+		supplier: Supplier to scope the query to.
+		bill_numbers: JSON-encoded list of bill_no strings.
+
+	Returns:
+		dict with keys:
+			matched:   list of {bill_no, pi_name, outstanding_amount, currency,
+			                    conversion_rate, posting_date}
+			ambiguous: list of {bill_no, candidates: [{pi_name, posting_date,
+			                    outstanding_amount}, ...]}
+			not_found: list of bill_no strings
+		Input order is preserved in all three partitions.
+	"""
+	import json as _json
+
+	from cecypo_powerpack.utils import is_feature_enabled
+
+	if not is_feature_enabled("enable_payment_reconciliation_powerup"):
+		frappe.throw(_("Payment Reconciliation PowerUp is not enabled in PowerPack Settings"))
+
+	if not frappe.has_permission("Purchase Invoice", "read"):
+		frappe.throw(_("Not permitted to read Purchase Invoice"), frappe.PermissionError)
+
+	# Input sanitation
+	try:
+		parsed = _json.loads(bill_numbers) if isinstance(bill_numbers, str) else bill_numbers
+	except ValueError:
+		frappe.throw(_("bill_numbers must be a JSON-encoded list of strings"))
+	if not isinstance(parsed, list):
+		frappe.throw(_("bill_numbers must be a JSON-encoded list of strings"))
+
+	# Strip, drop blanks, uniquify preserving first-seen order
+	seen = set()
+	cleaned: list[str] = []
+	for raw in parsed:
+		if not isinstance(raw, str):
+			continue
+		s = raw.strip()
+		if not s or s in seen:
+			continue
+		seen.add(s)
+		cleaned.append(s)
+
+	if len(cleaned) > 200:
+		frappe.throw(_("Too many bill numbers in one paste (max 200)"))
+
+	if not cleaned:
+		return {"matched": [], "ambiguous": [], "not_found": []}
+
+	rows = frappe.db.get_all(
+		"Purchase Invoice",
+		filters={
+			"supplier": supplier,
+			"company": company,
+			"docstatus": 1,
+			"outstanding_amount": [">", 0],
+			"bill_no": ["in", cleaned],
+		},
+		fields=[
+			"name", "bill_no", "outstanding_amount", "currency",
+			"conversion_rate", "posting_date", "grand_total",
+		],
+	)
+
+	# Group rows by bill_no
+	by_bill: dict[str, list] = {}
+	for r in rows:
+		by_bill.setdefault(r["bill_no"], []).append(r)
+
+	matched: list[dict] = []
+	ambiguous: list[dict] = []
+	not_found: list[str] = []
+
+	for bill_no in cleaned:
+		candidates = by_bill.get(bill_no, [])
+		if len(candidates) == 1:
+			c = candidates[0]
+			matched.append({
+				"bill_no": bill_no,
+				"pi_name": c["name"],
+				"outstanding_amount": c["outstanding_amount"],
+				"currency": c["currency"],
+				"conversion_rate": c["conversion_rate"],
+				"posting_date": c["posting_date"],
+			})
+		elif len(candidates) > 1:
+			ambiguous.append({
+				"bill_no": bill_no,
+				"candidates": [
+					{
+						"pi_name": c["name"],
+						"posting_date": c["posting_date"],
+						"outstanding_amount": c["outstanding_amount"],
+					}
+					for c in candidates
+				],
+			})
+		else:
+			not_found.append(bill_no)
+
+	return {"matched": matched, "ambiguous": ambiguous, "not_found": not_found}

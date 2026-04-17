@@ -696,9 +696,378 @@ function parse_paste(text) {
 	return { rows, skipped };
 }
 
+function _credit_options_from_payments(payments) {
+	return (payments || []).filter(p => (p.amount || 0) > 0).map(p => {
+		const currency = p.currency || frappe.defaults.get_global_default('currency');
+		const label = `${p.reference_name} — ${p.reference_type} — ${format_currency(p.amount, currency)}`;
+		const value = `${p.reference_type}|${p.reference_name}`;
+		return { label, value };
+	});
+}
+
+function _lookup_credit(frm, composite_key) {
+	if (!composite_key) return null;
+	const [ref_type, ref_name] = composite_key.split('|');
+	return (frm.doc.payments || []).find(
+		p => p.reference_type === ref_type && p.reference_name === ref_name && (p.amount || 0) > 0,
+	) || null;
+}
+
+function _credit_available(frm, payment) {
+	if (!payment) return 0;
+	const gross = payment.amount || 0;
+	const already = (frm.doc.allocation || [])
+		.filter(a => a.reference_type === payment.reference_type && a.reference_name === payment.reference_name)
+		.reduce((acc, a) => acc + (a.allocated_amount || 0), 0);
+	return flt(gross - already, 2);
+}
+
+function run_auto_distribute(rows, credit_available) {
+	// 1. Cap each row to [0, outstanding]
+	rows.forEach(r => {
+		r.amount = Math.max(0, Math.min(flt(r.amount || 0), flt(r.outstanding_amount || 0)));
+	});
+	// 2. Compute total
+	let total = rows.reduce((s, r) => s + r.amount, 0);
+	// 3. If over credit, absorb from the tail
+	if (total > credit_available) {
+		let overflow = total - credit_available;
+		for (let i = rows.length - 1; i >= 0 && overflow > 0; i--) {
+			const take = Math.min(rows[i].amount, overflow);
+			rows[i].amount -= take;
+			overflow -= take;
+		}
+	}
+	// 4. Round to 2 decimals, nudge last non-zero by residual
+	rows.forEach(r => { r.amount = flt(r.amount, 2); });
+	const rounded_total = rows.reduce((s, r) => s + r.amount, 0);
+	const target = Math.min(total, credit_available);
+	const residual = flt(target - rounded_total, 2);
+	if (residual !== 0) {
+		for (let i = rows.length - 1; i >= 0; i--) {
+			if (rows[i].amount > 0) {
+				rows[i].amount = flt(rows[i].amount + residual, 2);
+				break;
+			}
+		}
+	}
+}
+
+function render_review_section(dialog, state) {
+	const currency = state.credit.currency || dialog.get_value('_currency') || frappe.defaults.get_global_default('currency');
+	const rows_html = state.matched.map((r, idx) => {
+		const diff = flt((r.amount || 0) - r.outstanding_amount, 2);
+		const diff_color = diff === 0 ? 'var(--text-muted)' : (diff > 0 ? '#ef4444' : '#10b981');
+		return `
+			<tr data-idx="${idx}">
+				<td style="font-family:monospace;">${frappe.utils.escape_html(r.bill_no)}</td>
+				<td style="font-family:monospace;">${frappe.utils.escape_html(r.pi_name)}</td>
+				<td style="text-align:right;">${format_currency(r.outstanding_amount, currency)}</td>
+				<td style="text-align:right;">
+					<input type="number" step="0.01" min="0" class="form-control input-xs zap-amount"
+					       data-idx="${idx}" value="${flt(r.amount || 0, 2)}"
+					       style="text-align:right;max-width:140px;display:inline-block;">
+				</td>
+				<td style="text-align:right;color:${diff_color};" class="zap-diff" data-idx="${idx}">
+					${format_currency(diff, currency)}
+				</td>
+				<td style="text-align:center;white-space:nowrap;">
+					<button class="btn btn-xs btn-default zap-match-out" data-idx="${idx}" title="${__('Set to outstanding')}">↔</button>
+					<button class="btn btn-xs btn-default zap-remove" data-idx="${idx}" title="${__('Remove')}">×</button>
+				</td>
+			</tr>`;
+	}).join('');
+
+	const skipped_rows = [
+		...state.ambiguous.map(a => `<tr>
+			<td style="font-family:monospace;">${frappe.utils.escape_html(a.bill_no)}</td>
+			<td>${__('Ambiguous: {0} candidates', [a.candidates.length])}</td>
+		</tr>`),
+		...state.not_found.map(b => `<tr>
+			<td style="font-family:monospace;">${frappe.utils.escape_html(b)}</td>
+			<td>${__('Not found')}</td>
+		</tr>`),
+		...state.invalid.map(s => `<tr>
+			<td style="font-family:monospace;">${frappe.utils.escape_html(s.line)}</td>
+			<td>${frappe.utils.escape_html(s.reason)}</td>
+		</tr>`),
+	].join('');
+
+	const total_skipped = state.ambiguous.length + state.not_found.length + state.invalid.length;
+	const skipped_collapsed = total_skipped === 0 ? ' hidden' : '';
+
+	const html = `
+		<div class="zap-review">
+			<div class="zap-summary" style="display:flex;gap:16px;flex-wrap:wrap;padding:8px 0 12px;font-size:12px;">
+				<div><strong>${__('Credit Available')}:</strong> <span class="zap-credit">${format_currency(state.credit_available, currency)}</span></div>
+				<div><strong>${__('Total Allocated')}:</strong> <span class="zap-total">${format_currency(0, currency)}</span></div>
+				<div><strong>${__('Remaining')}:</strong> <span class="zap-remaining" style="font-weight:700;">${format_currency(state.credit_available, currency)}</span></div>
+				<div><strong>${__('Matched')}:</strong> ${state.matched.length}</div>
+				<div><strong>${__('Skipped')}:</strong> ${total_skipped}</div>
+			</div>
+			<div class="zap-overalloc-warning" style="display:none;color:#ef4444;font-weight:600;padding:4px 0;"></div>
+			<table class="table table-bordered table-sm" style="font-size:12px;">
+				<thead style="background:var(--control-bg);">
+					<tr>
+						<th>${__('Bill No')}</th>
+						<th>${__('PI Name')}</th>
+						<th style="text-align:right;">${__('Outstanding')}</th>
+						<th style="text-align:right;">${__('Amount')}</th>
+						<th style="text-align:right;">${__('Diff')}</th>
+						<th style="text-align:center;">${__('Actions')}</th>
+					</tr>
+				</thead>
+				<tbody class="zap-matched">${rows_html || `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">${__('No matched rows')}</td></tr>`}</tbody>
+			</table>
+			<details${total_skipped === 0 ? '' : ' open'}${skipped_collapsed}>
+				<summary style="cursor:pointer;font-weight:600;">${__('Skipped / Unmatched')} (${total_skipped})</summary>
+				<table class="table table-bordered table-sm" style="font-size:12px;margin-top:6px;">
+					<thead><tr><th>${__('Input')}</th><th>${__('Reason')}</th></tr></thead>
+					<tbody>${skipped_rows}</tbody>
+				</table>
+			</details>
+			<div style="display:flex;gap:8px;padding-top:8px;">
+				<button class="btn btn-default btn-sm zap-auto">${__('Auto Distribute')}</button>
+				<button class="btn btn-default btn-sm zap-reset">${__('Reset')}</button>
+			</div>
+		</div>
+	`;
+
+	dialog.fields_dict.review.$wrapper.html(html);
+	_wire_review_handlers(dialog, state);
+	_recompute_summary(dialog, state);
+}
+
+function _wire_review_handlers(dialog, state) {
+	const $w = dialog.fields_dict.review.$wrapper;
+
+	$w.off('input', '.zap-amount').on('input', '.zap-amount', function () {
+		const idx = parseInt($(this).data('idx'), 10);
+		state.matched[idx].amount = flt($(this).val());
+		_recompute_summary(dialog, state);
+	});
+
+	$w.off('click', '.zap-match-out').on('click', '.zap-match-out', function () {
+		const idx = parseInt($(this).data('idx'), 10);
+		state.matched[idx].amount = flt(state.matched[idx].outstanding_amount, 2);
+		render_review_section(dialog, state);
+	});
+
+	$w.off('click', '.zap-remove').on('click', '.zap-remove', function () {
+		const idx = parseInt($(this).data('idx'), 10);
+		state.matched.splice(idx, 1);
+		render_review_section(dialog, state);
+	});
+
+	$w.off('click', '.zap-auto').on('click', '.zap-auto', function () {
+		run_auto_distribute(state.matched, state.credit_available);
+		render_review_section(dialog, state);
+	});
+
+	$w.off('click', '.zap-reset').on('click', '.zap-reset', function () {
+		state.matched.forEach(r => { r.amount = r._pasted_amount; });
+		render_review_section(dialog, state);
+	});
+}
+
+function _recompute_summary(dialog, state) {
+	const $w = dialog.fields_dict.review.$wrapper;
+	const currency = state.credit.currency || frappe.defaults.get_global_default('currency');
+	const total = state.matched.reduce((s, r) => s + flt(r.amount || 0), 0);
+	const remaining = flt(state.credit_available - total, 2);
+	$w.find('.zap-total').text(format_currency(total, currency));
+	$w.find('.zap-remaining').text(format_currency(remaining, currency)).css(
+		'color', remaining < 0 ? '#ef4444' : '#10b981',
+	);
+	const $warn = $w.find('.zap-overalloc-warning');
+	if (remaining < 0) {
+		$warn.text(__('Over-allocated by {0}', [format_currency(-remaining, currency)])).show();
+	} else {
+		$warn.hide();
+	}
+	// Disable primary when over-allocated or nothing to allocate
+	const has_amount = state.matched.some(r => flt(r.amount || 0) > 0);
+	dialog.get_primary_btn().prop('disabled', remaining < 0 || !has_amount);
+}
+
 function zero_allocate_with_paste(frm) {
-	// Stub — wired up in Task 5
-	frappe.msgprint(__('Zero Allocate with Paste — coming in Task 5'));
+	const credit_options = _credit_options_from_payments(frm.doc.payments);
+	if (!credit_options.length) {
+		frappe.msgprint({
+			title: __('No Credits Available'),
+			message: __('Run "Get Unreconciled Entries" first — no payments with amount > 0 were found.'),
+			indicator: 'orange',
+		});
+		return;
+	}
+
+	const state = {
+		credit: null,
+		credit_available: 0,
+		matched: [],
+		ambiguous: [],
+		not_found: [],
+		invalid: [],
+	};
+
+	const dialog = new frappe.ui.Dialog({
+		title: __('Zero Allocate with Paste'),
+		size: 'large',
+		fields: [
+			{
+				fieldname: 'credit', fieldtype: 'Select', label: __('Credit'), reqd: 1,
+				options: [''].concat(credit_options.map(o => o.value)).join('\n'),
+				description: __("Shown: credits loaded from this document. Run 'Get Unreconciled Entries' first if the credit you want is missing."),
+			},
+			{
+				fieldname: 'paste', fieldtype: 'Small Text', label: __('Paste (bill_no, amount)'),
+				description: __('Tab-, comma-, or multi-space-separated. First row treated as header if amount column is non-numeric.'),
+			},
+			{ fieldname: 'parse_btn', fieldtype: 'Button', label: __('Parse & Match') },
+			{ fieldname: 'review', fieldtype: 'HTML' },
+		],
+		primary_action_label: __('Proceed'),
+		primary_action() { proceed_zero_allocate_paste(frm, dialog, state); },
+	});
+
+	// Relabel the Select options to human-readable via DOM once rendered.
+	// Frappe Select only accepts string options; we post-decorate.
+	dialog.$wrapper.on('shown.bs.modal', function () {
+		const $sel = dialog.fields_dict.credit.$input;
+		$sel.find('option').each(function () {
+			const val = $(this).val();
+			const opt = credit_options.find(o => o.value === val);
+			if (opt) $(this).text(opt.label);
+		});
+	});
+
+	dialog.fields_dict.credit.$input.on('change', function () {
+		state.credit = _lookup_credit(frm, dialog.get_value('credit'));
+		state.credit_available = _credit_available(frm, state.credit);
+		dialog.fields_dict.parse_btn.$input.prop('disabled', !state.credit);
+		dialog.fields_dict.paste.$input.prop('disabled', !state.credit);
+	});
+	dialog.fields_dict.parse_btn.$input.prop('disabled', true);
+	dialog.fields_dict.paste.$input.prop('disabled', true);
+
+	dialog.fields_dict.parse_btn.$input.on('click', function () {
+		const text = dialog.get_value('paste') || '';
+		const { rows, skipped } = parse_paste(text);
+		if (!rows.length) {
+			frappe.msgprint({ title: __('Nothing to match'),
+				message: __('Paste at least one row with a parseable amount.'), indicator: 'orange' });
+			return;
+		}
+		const bill_nos = rows.map(r => r.bill_no);
+		frappe.call({
+			method: 'cecypo_powerpack.api.resolve_bill_numbers_for_credit',
+			args: {
+				company: frm.doc.company,
+				supplier: frm.doc.party,
+				bill_numbers: JSON.stringify(bill_nos),
+			},
+			freeze: true,
+			freeze_message: __('Resolving bill numbers…'),
+			callback(r) {
+				if (!r.message) return;
+				const pasted_map = Object.fromEntries(rows.map(x => [x.bill_no, x.amount]));
+				state.matched = (r.message.matched || []).map(m => ({
+					...m,
+					amount: flt(pasted_map[m.bill_no] || 0, 2),
+					_pasted_amount: flt(pasted_map[m.bill_no] || 0, 2),
+				}));
+				state.ambiguous = r.message.ambiguous || [];
+				state.not_found = r.message.not_found || [];
+				state.invalid = skipped;
+				render_review_section(dialog, state);
+			},
+		});
+	});
+
+	dialog.show();
+}
+
+function proceed_zero_allocate_paste(frm, dialog, state) {
+	// Guards
+	if (!state.credit) {
+		frappe.msgprint({ title: __('Error'), message: __('Pick a credit first.'), indicator: 'red' }); return;
+	}
+	const fresh = _lookup_credit(frm, `${state.credit.reference_type}|${state.credit.reference_name}`);
+	if (!fresh) {
+		frappe.msgprint({
+			title: __('Credit no longer available'),
+			message: __('The selected credit is no longer available — please reopen the dialog.'),
+			indicator: 'red',
+		});
+		return;
+	}
+	const rows = state.matched.filter(r => flt(r.amount || 0) > 0);
+	if (!rows.length) {
+		frappe.msgprint({ title: __('Nothing to allocate'),
+			message: __('Set an amount > 0 on at least one row.'), indicator: 'orange' });
+		return;
+	}
+	const total = rows.reduce((s, r) => s + flt(r.amount), 0);
+	if (total - state.credit_available > 0.005) {
+		frappe.msgprint({ title: __('Over-allocated'),
+			message: __('Reduce amounts so total ≤ Credit Available.'), indicator: 'red' });
+		return;
+	}
+
+	const do_populate = (replace) => {
+		const payments_payload = [fresh];
+		const invoices_payload = rows.map(r => ({
+			invoice_type: 'Purchase Invoice',
+			invoice_number: r.pi_name,
+			outstanding_amount: r.outstanding_amount,
+			currency: r.currency,
+		}));
+		frappe.call({
+			method: 'cecypo_powerpack.api.zero_allocate_entries',
+			args: { doc: frm.doc, payments: payments_payload, invoices: invoices_payload },
+			freeze: true,
+			freeze_message: __('Building allocation rows…'),
+			callback(r) {
+				if (!r.message?.length) {
+					frappe.msgprint({ title: __('No Allocations Created'),
+						message: __('Nothing was produced.'), indicator: 'orange' });
+					return;
+				}
+				if (replace) frm.clear_table('allocation');
+				const amount_map = Object.fromEntries(rows.map(x => [x.pi_name, flt(x.amount, 2)]));
+				r.message.forEach(a => {
+					a.allocated_amount = amount_map[a.invoice_number] ?? 0;
+					Object.assign(frm.add_child('allocation'), a);
+				});
+				frm.refresh_field('allocation');
+				dialog.hide();
+				frappe.show_alert({
+					message: __('Added {0} allocation rows. Click Zero Reconcile to commit.', [r.message.length]),
+					indicator: 'green',
+				});
+				setTimeout(() => setup_zero_reconcile_button(frm), 100);
+			},
+		});
+	};
+
+	if ((frm.doc.allocation || []).length > 0) {
+		const picker = new frappe.ui.Dialog({
+			title: __('Existing Allocations Found'),
+			fields: [
+				{ fieldtype: 'HTML', options:
+					`<p>${__('There are {0} existing allocation rows.', [frm.doc.allocation.length])}</p>
+					 <p>${__('This will add {0} new rows. What would you like to do?', [rows.length])}</p>` },
+				{ fieldname: 'action', fieldtype: 'Select', label: 'Action',
+				  options: ['Replace existing allocations', 'Append to existing allocations'],
+				  default: 'Append to existing allocations', reqd: 1 },
+			],
+			primary_action_label: __('Continue'),
+			primary_action(v) { picker.hide(); do_populate(v.action === 'Replace existing allocations'); },
+		});
+		picker.show();
+	} else {
+		do_populate(false);
+	}
 }
 
 })();

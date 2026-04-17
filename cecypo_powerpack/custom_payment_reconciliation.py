@@ -67,6 +67,8 @@ class CustomPaymentReconciliation(PaymentReconciliation):
 
         frappe.msgprint(_("Successfully Reconciled"), indicator="green")
 
+    # NOTE: The process-level monkey-patch in zero_reconcile() is safe under preforked
+    # Gunicorn (current bench16 config). Under gevent/gthread it would race across greenlets.
     def _reconcile_without_validation(self):
         """
         Internal method that performs reconciliation without the strict validation.

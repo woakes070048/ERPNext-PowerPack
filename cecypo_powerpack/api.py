@@ -14,6 +14,14 @@ from frappe import _
 
 
 @frappe.whitelist()
+def get_settings_for_client() -> dict:
+    # Singleton load that bypasses User Permissions. The child table company_borders
+    # can reference companies a given user lacks access to, which would otherwise
+    # abort the load and break every PowerPack feature gated by Settings.get.
+    return frappe.get_doc("PowerPack Settings", "PowerPack Settings").as_dict()
+
+
+@frappe.whitelist()
 def get_system_health() -> dict:
     """
     Get system health status and statistics.

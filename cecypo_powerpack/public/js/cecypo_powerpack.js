@@ -118,11 +118,7 @@ CecypoPowerPack.Settings = {
 
         // Fetch settings from server
         frappe.call({
-            method: 'frappe.client.get',
-            args: {
-                doctype: 'PowerPack Settings',
-                name: 'PowerPack Settings'
-            },
+            method: 'cecypo_powerpack.api.get_settings_for_client',
             callback: function(r) {
                 if (r.message) {
                     CecypoPowerPack.Settings._cache.settings = r.message;
